@@ -1,12 +1,16 @@
 package main
 
-import "net/http"
+import (
+	"flag"
+)
 
 func main() {
-	client := http.DefaultClient
+	authCmd := flag.NewFlagSet("auth", flag.ExitOnError)
+	authEnable := authCmd.Bool("enable", false, "description")
+	// client := http.DefaultClient
 	// _, err := AuthenticateTrello()
 	// if err != nil {
 	// 	return
 	// }
-	AuthenticateGithub(client)
+	// cli, _ := AuthenticateGithub(client)
 }
