@@ -1,10 +1,10 @@
-module github.com/timtraversy/trello-to-github
+module github.com/timtraversy/trellotogithub
 
 go 1.15
 
 require (
-	github.com/adlio/trello v1.8.0
-	github.com/google/go-github v17.0.0+incompatible
-	github.com/google/go-querystring v1.0.0 // indirect
-	golang.org/x/oauth2 v0.0.0-20201109201403-9fd604954f58
+	github.com/google/go-github/v32 v32.1.0
+	github.com/timtraversy/trellotogithub/githubdeviceauth v0.0.0-20201126204849-5ac8fb4bd0e6
 )
+
+replace github.com/timtraversy/trellotogithub/githubdeviceauth => ./githubdeviceauth

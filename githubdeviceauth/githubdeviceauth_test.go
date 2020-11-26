@@ -6,12 +6,64 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
-	"github.com/google/go-github/github"
+	"github.com/google/go-github/v32/github"
 )
 
-var mockDeviceCodesResponse = deviceCodesResponse{
+func TestAuthenticateGithub(t *testing.T) {
+	gotOut := bytes.NewBufferString("")
+
+	var githubAuthenticator = GithubDeviceAuthenticator{
+		BaseURL: mockGithubServer.URL,
+		Out:     gotOut,
+	}
+
+	got, err := githubAuthenticator.AuthenticateGithub([]github.Scope{github.ScopeAdminOrg})
+	checkError(err, t)
+	compareStructs(got, mockDeviceAuthorizationResponse.AccessToken, t)
+
+	var wantOut = []string{
+		fmt.Sprintln(requestingCodes),
+		fmt.Sprintf(codeEntryInstructions, mockDeviceCodes.VerificationURI, mockDeviceCodes.UserCode),
+	}
+
+	for _, want := range wantOut {
+		got, _ := gotOut.ReadString('\n')
+		if got != want {
+			t.Errorf("Got %v, want %v", gotOut, wantOut)
+		}
+	}
+}
+
+func TestRequestDeviceCodes(t *testing.T) {
+	got, err := githubAuthenticator.RequestDeviceCodes([]github.Scope{github.ScopeAdminOrg})
+	checkError(err, t)
+	compareStructs(got, mockDeviceCodes, t)
+}
+
+func TestWaitForAuthorization(t *testing.T) {
+	got, err := githubAuthenticator.WaitForAuthorization(mockDeviceCodes)
+	checkError(err, t)
+	compareStructs(got, mockDeviceAuthorizationResponse.AccessToken, t)
+}
+
+func checkError(err error, t *testing.T) {
+	t.Helper()
+	if err != nil {
+		t.Errorf("Got unexpected error: %v", err)
+	}
+}
+
+func compareStructs(got interface{}, want interface{}, t *testing.T) {
+	t.Helper()
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Got %v, want %v", got, mockDeviceCodes)
+	}
+}
+
+var mockDeviceCodes = DeviceCodes{
 	DeviceCode:      "1",
 	UserCode:        "2",
 	VerificationURI: "test.com",
@@ -23,43 +75,17 @@ var mockDeviceAuthorizationResponse = deviceAuthorizationResponse{
 	AccessToken: "1",
 }
 
-func TestAuthenticateGithub(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.String() {
-		case deviceCodeURL:
-			jsonResponse, _ := json.Marshal(mockDeviceCodesResponse)
-			w.Write(jsonResponse)
-		case authTokenURL:
-			jsonResponse, _ := json.Marshal(mockDeviceAuthorizationResponse)
-			w.Write(jsonResponse)
-		}
-	}))
-	defer server.Close()
-
-	gotOut := bytes.NewBufferString("")
-
-	want := mockDeviceAuthorizationResponse.AccessToken
-
-	got, err := AuthenticateGithub([]github.Scope{github.ScopeAdminOrg}, gotOut, server.URL)
-
-	if err != nil {
-		t.Errorf("Unexpected error: %s", err)
+var mockGithubServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	switch r.URL.String() {
+	case deviceCodeURL:
+		jsonResponse, _ := json.Marshal(mockDeviceCodes)
+		w.Write(jsonResponse)
+	case authTokenURL:
+		jsonResponse, _ := json.Marshal(mockDeviceAuthorizationResponse)
+		w.Write(jsonResponse)
 	}
+}))
 
-	if got != want {
-		t.Errorf("Got %v, want %v", got, want)
-	}
-
-	var wantOut = []string{
-		fmt.Sprintln(requestingCodes),
-		fmt.Sprintf(codeEntryInstructions, mockDeviceCodesResponse.VerificationURI, mockDeviceCodesResponse.UserCode),
-		fmt.Sprintln(waitingForAuthorization),
-	}
-
-	for _, want := range wantOut {
-		got, _ := gotOut.ReadString('\n')
-		if got != want {
-			t.Errorf("Got %v, want %v", gotOut, wantOut)
-		}
-	}
+var githubAuthenticator = GithubDeviceAuthenticator{
+	BaseURL: mockGithubServer.URL,
 }

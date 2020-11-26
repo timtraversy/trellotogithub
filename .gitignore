@@ -1,2 +1,11 @@
+# Keys
 secrets.go
-trello-to-github
+
+# Storage
+.auth.yaml
+
+# Artifacts
+trellotogithub
+
+# OS
+.DS_Store
