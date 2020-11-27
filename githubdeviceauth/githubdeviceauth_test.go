@@ -13,7 +13,7 @@ import (
 )
 
 func TestAuthenticateGithub(t *testing.T) {
-	gotOut := bytes.NewBufferString("")
+	gotOut := &bytes.Buffer{}
 
 	var githubAuthenticator = GithubDeviceAuthenticator{
 		BaseURL: mockGithubServer.URL,
@@ -59,7 +59,7 @@ func checkError(err error, t *testing.T) {
 func compareStructs(got interface{}, want interface{}, t *testing.T) {
 	t.Helper()
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("Got %v, want %v", got, mockDeviceCodes)
+		t.Errorf("Got %v, want %v", got, want)
 	}
 }
 

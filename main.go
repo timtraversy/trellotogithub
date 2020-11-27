@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"io"
 	"os"
 
@@ -30,7 +29,6 @@ func githubToTrelloMain() {
 	in := os.Stdin
 	out := os.Stdout
 	if len(os.Args) == 1 {
-		fmt.Println("Run")
 		return
 	}
 	switch os.Args[1] {
