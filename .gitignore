@@ -2,7 +2,7 @@
 secrets.go
 
 # Storage
-.auth.yaml
+config.yaml
 
 # Artifacts
 trellotogithub
