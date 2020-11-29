@@ -1,4 +1,4 @@
-package githubdeviceauth
+package github
 
 import (
 	"bytes"
