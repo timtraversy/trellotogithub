@@ -8,7 +8,7 @@ import (
 	"io/ioutil"
 	"os"
 
-	"github.com/trellotogithub/deviceauth"
+	"github.com/timtraversy/trellotogithub/deviceauth"
 
 	"github.com/adlio/trello"
 	"github.com/google/go-github/v32/github"
@@ -28,6 +28,8 @@ var (
 )
 
 func main() {
+	deviceauth.NewAuthenticator()
+	return
 	githubToTrelloMain()
 	os.Exit(exitCode)
 }
