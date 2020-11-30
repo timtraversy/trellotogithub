@@ -28,8 +28,6 @@ var (
 )
 
 func main() {
-	deviceauth.NewAuthenticator()
-	return
 	githubToTrelloMain()
 	os.Exit(exitCode)
 }

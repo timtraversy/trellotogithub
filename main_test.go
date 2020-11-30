@@ -5,9 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"reflect"
 	"testing"
 
 	"github.com/adlio/trello"
@@ -90,10 +91,10 @@ var mockProjects = []*github.Project{
 
 func TestSelectProject(t *testing.T) {
 	out := &bytes.Buffer{}
-	wantOut := fmt.Sprintf(`Select the GitHub project you want to export to:
+	wantOut := fmt.Sprintf(`Sxlect the GitHub project you want to export to:
 (0) %v
 (1) %v
-`, mockProjects[0].Name, mockProjects[1].Name)
+`, *mockProjects[0].Name, *mockProjects[1].Name)
 	selection := 0
 	in := bytes.Buffer{}
 	in.Write([]byte(fmt.Sprint(selection)))
@@ -110,48 +111,51 @@ func TestSelectProject(t *testing.T) {
 	assertStringMatch(out.String(), wantOut, t)
 }
 
-func selectBoard(client *trello.Client, in io.Reader, out io.Writer) *trello.Board {
-	boards, _ := client.GetMyBoards(trello.Defaults())
-	fmt.Fprintln(out, "Select the Trello board you want to import from:")
-	for i, board := range boards {
-		fmt.Fprintf(out, "(%v) %v\n", i, board.Name)
+// Utis
+func assertNoError(err error, t *testing.T) {
+	t.Helper()
+	if err != nil {
+		t.Errorf("Got unexpected error: %v", err)
 	}
-
-	var selection int
-	fmt.Fscanf(in, "%d", selection)
-	return boards[selection]
 }
 
-type repositoriesClient interface {
-	List(ctx context.Context, user string, opts *github.RepositoryListOptions) ([]*github.Repository, *github.Response, error)
-}
-
-type usersClient interface {
-	Get(ctx context.Context, user string) (*github.User, *github.Response, error)
-	ListProjects(ctx context.Context, user string, opts *github.ProjectListOptions) ([]*github.Project, *github.Response, error)
-}
-
-func selectRepository(client repositoriesClient, in io.Reader, out io.Writer) *github.Repository {
-	repos, _, _ := client.List(context.Background(), "", nil)
-	fmt.Fprintln(out, "Select the GitHub repository whose projects you want to export to:")
-	for i, repo := range repos {
-		fmt.Fprintf(out, "(%v) %v\n", i, *repo.Name)
+func assertStringMatch(got string, want string, t *testing.T) {
+	t.Helper()
+	if got != want {
+		t.Errorf("Got %s, want %s", got, want)
 	}
-
-	var selection int
-	fmt.Fscanf(in, "%d", &selection)
-	return repos[selection]
 }
 
-func selectProject(client usersClient, in io.Reader, out io.Writer) *github.Project {
-	user, _, _ := client.Get(context.Background(), "")
-	projects, _, _ := client.ListProjects(context.Background(), user.GetName(), nil)
-	fmt.Fprintln(out, "Select the GitHub project you want to export to:")
-	for i, project := range projects {
-		fmt.Fprintf(out, "(%v) %v\n", i, *project.Name)
+func assertStructsMatch(got interface{}, want interface{}, t *testing.T) {
+	t.Helper()
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Got %v, want %v", got, want)
 	}
+}
 
-	var selection int
-	fmt.Fscanf(in, "%d\n", &selection)
-	return projects[selection]
+const (
+	baseURLPath = "/api-v3"
+)
+
+func mockGithubClient() (client *github.Client, mux *http.ServeMux, teardown func()) {
+	// mux is the HTTP request multiplexer used with the test server.
+	mux = http.NewServeMux()
+
+	// We want to ensure that tests catch mistakes where the endpoint URL is
+	// specified as absolute rather than relative. It only makes a difference
+	// when there's a non-empty base URL path. So, use that. See issue #752.
+	apiHandler := http.NewServeMux()
+	apiHandler.Handle(baseURLPath+"/", http.StripPrefix(baseURLPath, mux))
+
+	// server is a test HTTP server used to provide mock API responses.
+	server := httptest.NewServer(apiHandler)
+
+	// client is the GitHub client being tested and is
+	// configured to use test server.
+	client = github.NewClient(nil)
+	url, _ := url.Parse(server.URL + baseURLPath + "/")
+	client.BaseURL = url
+	client.UploadURL = url
+
+	return client, mux, server.Close
 }
