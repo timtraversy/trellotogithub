@@ -3,28 +3,21 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"net/url"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/adlio/trello"
 	"github.com/google/go-github/v32/github"
 )
 
-func mockServer() *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/members/me/boards":
-			jsonResponse, _ := json.Marshal(mockBoards)
-			w.Write(jsonResponse)
-		}
-	}))
-}
+var idOne = int64(1)
+var nameOne = "Project One"
+var idTwo = int64(2)
+var nameTwo = "Project Two"
 
+// Mocks
 var mockBoards = []trello.Board{
 	{
 		ID:   "1",
@@ -35,37 +28,98 @@ var mockBoards = []trello.Board{
 		Name: "Test Two",
 	},
 }
-
-func mockClient(baseURL string) *trello.Client {
-	client := trello.NewClient(apikey, testtoken)
-	client.BaseURL = baseURL
-	return client
+var mockProjects = []*github.Project{
+	{
+		ID:   &idOne,
+		Name: &nameOne,
+	},
+	{
+		ID:   &idTwo,
+		Name: &nameTwo,
+	},
 }
 
-func TestSelectBoard(t *testing.T) {
-	server := mockServer()
-	defer server.Close()
-	client := mockClient(server.URL)
+type mockTrelloClient struct {
+}
 
-	out := &bytes.Buffer{}
-	wantOut := fmt.Sprintf(`Select the Trello board you want to import from:
-(0) %v
-(1) %v
-`, mockBoards[0].Name, mockBoards[1].Name)
-	selection := 0
+type mockGithubClient struct {
+}
+
+var clientFactory = ClientFactory{
+	trelloClientFactory: func(token string) TrelloClient {
+		return mockTrelloClient{}
+	},
+	githubClientFactory: func(token string) GithubClient {
+		return mockGithubClient{}
+	},
+}
+
+func TestConfigure(t *testing.T) {
 	in := bytes.Buffer{}
-	in.Write([]byte(fmt.Sprint(selection)))
+	out := bytes.Buffer{}
 
-	gotBoard := selectBoard(client, &in, out)
+	in.WriteString("0")
+	in.WriteString("0")
+	in.WriteString("n")
 
-	assertStringMatch(gotBoard.ID, mockBoards[selection].ID, t)
-	assertStringMatch(out.String(), wantOut, t)
+	// Return Configuration struct
+	configure(&in, &out, clientFactory)
+
+	wantOut := `# Configuration
+No configuration file found in this directory. Follow the prompts to configure the tool.
+
+## Trello authentication:
+In your browser, open https://trello.com/1/authorize?expiration=never&name=Trello%%20to%%20Github&scope=read,account&response_type=token&key=%v\n
+When the authentication process is complete, enter the token you receied here.
+Token:
+Successfully authenticated with Trello as testUser.
+
+## GitHub authentication:
+Requesting device and user verification codes from GitHub...
+Please go to https://test.com and enter the code TEST.
+Successfully authenticated with GitHub.
+
+## Card mapping:
+### Trello board
+Fetching Trello boards...
+Select the Trello board you want to import from:
+[0] Test One (ID: 1)
+[1] Test Two (ID: 2)
+Board:
+Selected 'Test One'.
+
+### GitHub repository 
+Fetching GitHub repositories:
+Select the GitHub repository whose projects you want to export to:
+[0] Repository One (ID: 1)
+[1] Repository Two (ID: 2)
+Selected 'Repository One'.
+
+### GitHub project 
+Fetching GitHub projects:
+Select the GitHub project you want to export to:
+[0] Project One (ID: 1)
+[1] Project Two (ID: 2)
+Selected 'Project One'.
+
+## Confirm
+Your configuration is:
+Trello account: testUser
+Trello board: Test One (ID: 1)
+GitHub account: testUser
+GitHub repository: Repository One (ID: 1)
+GitHub project: Project One (ID: 1)
+
+Would you like to proceed with the import using these settings?
+(y/n)
+
+Would you like to save this configuration to a 'config.yaml' file for next time?
+(y/n) 
+
+Configuration complete.
+`
+	assertParagraphMatch(out.String(), wantOut, t)
 }
-
-var idOne = int64(1)
-var nameOne = "Project One"
-var idTwo = int64(2)
-var nameTwo = "Project Two"
 
 type mockUsersClient struct {
 }
@@ -78,40 +132,14 @@ func (m *mockUsersClient) ListProjects(ctx context.Context, user string, opts *g
 	return mockProjects, nil, nil
 }
 
-var mockProjects = []*github.Project{
-	{
-		ID:   &idOne,
-		Name: &nameOne,
-	},
-	{
-		ID:   &idTwo,
-		Name: &nameTwo,
-	},
-}
-
-func TestSelectProject(t *testing.T) {
-	out := &bytes.Buffer{}
-	wantOut := fmt.Sprintf(`Sxlect the GitHub project you want to export to:
-(0) %v
-(1) %v
-`, *mockProjects[0].Name, *mockProjects[1].Name)
-	selection := 0
-	in := bytes.Buffer{}
-	in.Write([]byte(fmt.Sprint(selection)))
-
-	muc := mockUsersClient{}
-
-	gotProject := selectProject(&muc, &in, out)
-	gotID := fmt.Sprint(*gotProject.ID)
-
-	wantProject := mockProjects[selection]
-	wantID := fmt.Sprint(*wantProject.ID)
-
-	assertStringMatch(gotID, wantID, t)
-	assertStringMatch(out.String(), wantOut, t)
-}
-
 // Utis
+func assertNotNil(got interface{}, t *testing.T) {
+	t.Helper()
+	if got == nil {
+		t.Errorf("Got unexpected nil: %v", got)
+	}
+}
+
 func assertNoError(err error, t *testing.T) {
 	t.Helper()
 	if err != nil {
@@ -133,29 +161,19 @@ func assertStructsMatch(got interface{}, want interface{}, t *testing.T) {
 	}
 }
 
-const (
-	baseURLPath = "/api-v3"
-)
+func assertParagraphMatch(got, want string, t *testing.T) {
+	fmt.Println(want)
+	t.Helper()
+	gotStrings := strings.Split(got, "\n")
+	wantStrings := strings.Split(want, "\n")
 
-func mockGithubClient() (client *github.Client, mux *http.ServeMux, teardown func()) {
-	// mux is the HTTP request multiplexer used with the test server.
-	mux = http.NewServeMux()
+	if len(gotStrings) != len(wantStrings) {
+		t.Errorf("Want paragraph with %v lines, got paragraph with %v lines", len(wantStrings), len(gotStrings))
+	}
 
-	// We want to ensure that tests catch mistakes where the endpoint URL is
-	// specified as absolute rather than relative. It only makes a difference
-	// when there's a non-empty base URL path. So, use that. See issue #752.
-	apiHandler := http.NewServeMux()
-	apiHandler.Handle(baseURLPath+"/", http.StripPrefix(baseURLPath, mux))
-
-	// server is a test HTTP server used to provide mock API responses.
-	server := httptest.NewServer(apiHandler)
-
-	// client is the GitHub client being tested and is
-	// configured to use test server.
-	client = github.NewClient(nil)
-	url, _ := url.Parse(server.URL + baseURLPath + "/")
-	client.BaseURL = url
-	client.UploadURL = url
-
-	return client, mux, server.Close
+	for i, gotString := range gotStrings {
+		if gotString != wantStrings[i] {
+			t.Errorf("Got %v, want %v", gotString, wantStrings[i])
+		}
+	}
 }

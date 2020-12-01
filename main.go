@@ -8,82 +8,97 @@ import (
 	"io/ioutil"
 	"os"
 
-	"github.com/timtraversy/trellotogithub/deviceauth"
-
 	"github.com/adlio/trello"
 	"github.com/google/go-github/v32/github"
 	"golang.org/x/oauth2"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
-// var (
-// 	// commmands
-// 	authCmd    = flag.NewFlagSet("-auth", flag.ExitOnError)
-// 	authTrello = authCmd.Bool("-trello", false, "Pass this to reauthenticate Trello")
-// 	authGithub = authCmd.Bool("-github", false, "Pass this to reauthenticate GitHub")
-// )
+type TrelloClient interface {
+}
 
-var (
-	exitCode = 0
-)
+type GithubClient interface {
+}
 
 func main() {
-	githubToTrelloMain()
-	os.Exit(exitCode)
-}
-
-func githubToTrelloMain() {
 	in := os.Stdin
 	out := os.Stdout
-	// if len(os.Args) == 1 {
-	// 	run()
-	// }
-	// switch os.Args[1] {
-	// case authCmd.Name():
-	// 	authCmd.Parse(os.Args[2:])
-	// 	if *authTrello {
-	// 		authenticateTrello(in, out)
-	// 	} else if *authGithub {
-	// 		authenticateGithub(out)
-	// 	} else {
-	// 		authenticate(out)
-	// 	}
-	// }
-	var authTokens AuthTokens
-	d, _ := ioutil.ReadFile(".auth.yaml")
-	yaml.Unmarshal(d, &authTokens)
-	if (authTokens == AuthTokens{}) {
-		// have to auth
-		trelloToken, _ := authenticateTrello(in, out)
-		githubAuthenticator := deviceauth.NewAuthenticator()
-		githubScopes := []github.Scope{github.ScopeRepo, github.ScopeAdminOrg, github.ScopeUser}
-		githubToken, _ := githubAuthenticator.AuthenticateGithub(githubScopes)
-		authTokens = AuthTokens{
-			Trello: trelloToken,
-			Github: githubToken,
-		}
-		d, _ = yaml.Marshal(authTokens)
-		fmt.Println(string(d))
-		ioutil.WriteFile(".auth.yaml", d, 0644)
-	}
-
-	// trelloClient := trello.NewClient(apikey, authTokens.Trello)
-	ts := oauth2.StaticTokenSource(
-		&oauth2.Token{AccessToken: authTokens.Github},
-	)
-	tc := oauth2.NewClient(context.Background(), ts)
-	githubClient := github.NewClient(tc)
-
-	// board := selectBoard(trelloClient, in, out)
-	repo := selectRepository(githubClient.Repositories, in, out)
-
-	// fmt.Println("Importing from ", board.Name, " to ", project.Name)
-	fmt.Println("Importing from x to", repo.GetName())
+	clientFactory := ClientFactory{
+		trelloClientFactory: func(token string) TrelloClient {
+			return trello.NewClient(apikey, token)
+		},
+		githubClientFactory: func(token string) GithubClient {
+			ts := oauth2.StaticTokenSource(
+				&oauth2.Token{AccessToken: token},
+			)
+			tc := oauth2.NewClient(context.Background(), ts)
+			return github.NewClient(tc)
+		}}
+	configure(in, out, clientFactory)
+	// TODO: execute import and export
 }
 
-type AuthTokens struct {
-	Trello string `yaml:"trello"`
-	Github string `yaml:"github"`
+type ClientFactory struct {
+	trelloClientFactory func(token string) TrelloClient
+	githubClientFactory func(token string) GithubClient
+}
+
+type Configuration struct {
+	TrelloAuth AuthConfiguration    `yaml:"trello"`
+	GithubAuth AuthConfiguration    `yaml:"github"`
+	Mapping    MappingConfiguration `yaml:"mapping"`
+}
+
+type AuthConfiguration struct {
+	Token    string    `yaml:"token"`
+	Username yaml.Node `yaml:"username"`
+}
+
+type MappingConfiguration struct {
+	TrelloBoard          string `yaml:"trello_board"`
+	TrelloBoardName      string `yaml:"trello_board_name"`
+	GithubRepository     string `yaml:"github_repository"`
+	GithubRepositoryName string `yaml:"github_repository_name"`
+	GithubProject        string `yaml:"github_project"`
+	GithubProjectName    string `yaml:"github_project_name"`
+}
+
+func configure(in io.Reader, out io.Writer, clientFactory ClientFactory) *Configuration {
+	var configuration Configuration
+	d, err := ioutil.ReadFile("config.yaml")
+	yaml.Unmarshal(d, &configuration)
+
+	if err != nil {
+		// no config
+	}
+
+	// Check missing values
+	// if configuration
+
+	// if (configuration == Configuration{}) {
+	// 	// S
+	// 	// have to auth
+	// 	trelloToken, _ := authenticateTrello(in, out)
+	// 	githubAuthenticator := deviceauth.NewAuthenticator()
+	// 	githubScopes := []github.Scope{github.ScopeRepo, github.ScopeAdminOrg, github.ScopeUser}
+	// 	githubToken, _ := githubAuthenticator.AuthenticateGithub(githubScopes)
+	// 	authTokens = AuthTokens{
+	// 		Trello: trelloToken,
+	// 		Github: githubToken,
+	// 	}
+	// 	d, _ = yaml.Marshal(authTokens)
+	// 	fmt.Println(string(d))
+	// 	ioutil.WriteFile(".auth.yaml", d, 0644)
+	// }
+
+	// trelloClient := trello.NewClient(apikey, authTokens.Trello)
+
+	// board := selectBoard(trelloClient, in, out)
+	// repo := selectRepository(githubClient.Repositories, in, out)
+
+	// // fmt.Println("Importing from ", board.Name, " to ", project.Name)
+	// fmt.Println("Importing from x to", repo.GetName())
+	return nil
 }
 
 func authenticateTrello(in io.Reader, out io.Writer) (token string, err error) {
@@ -143,22 +158,3 @@ func selectProject(client usersClient, in io.Reader, out io.Writer) *github.Proj
 	fmt.Fscanf(in, "%d\n", &selection)
 	return projects[selection]
 }
-
-// func authenticate(out io.Writer) (trelloToken, githubToken string, err error) {
-// 	trelloToken, err = authenticateTrello(os.Stdin, out)
-// 	if err != nil {
-// 		return "", "", err
-// 	}
-// 	githubToken, err = authenticateGithub(out)
-// 	if err != nil {
-// 		return "", "", err
-// 	}
-// 	return trelloToken, githubToken, nil
-// }
-
-// func authenticateGithub(out io.Writer) (token string, err error) {
-// 	githubScopes := []github.Scope{github.ScopeRepo, github.ScopeAdminOrg, github.ScopeUser}
-// 	githubAuthenticator := githubdeviceauth.NewAuthenticator()
-// 	token, err = githubAuthenticator.AuthenticateGithub(githubScopes)
-// 	return
-// }
