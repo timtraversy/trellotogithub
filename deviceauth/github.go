@@ -26,7 +26,7 @@ func NewAuthenticator() *GithubDeviceAuthenticator {
 	}
 }
 
-const requestingCodes = "Requesting device and user verification codes from GitHub"
+const requestingCodes = "Requesting device and user verification codes from GitHub..."
 const codeEntryInstructions = "Please go to %s and enter the code %s\n"
 
 func (g *GithubDeviceAuthenticator) AuthenticateGithub(scopes []github.Scope) (token string, err error) {

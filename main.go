@@ -1,46 +1,68 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 
 	"github.com/adlio/trello"
 	"github.com/google/go-github/v32/github"
+	"github.com/timtraversy/trellotogithub/deviceauth"
 	"golang.org/x/oauth2"
-	"gopkg.in/yaml.v3"
 )
 
-type TrelloClient interface {
+type clientFactory struct {
+	newTrelloClient        func(token string) trelloClient
+	newGithubAuthenticator func() githubAuthenticator
+	newGithubClient        func(token string) githubClient
 }
 
-type GithubClient interface {
+type trelloClient interface {
+	GetMember(memberID string, args trello.Arguments) (member *trello.Member, err error)
+	GetMyBoards(args trello.Arguments) (boards []*trello.Board, err error)
+}
+
+type githubAuthenticator interface {
+	AuthenticateGithub(scopes []github.Scope) (token string, err error)
+}
+
+type githubClient struct {
+	repositories repositoriesService
+	users        userService
+}
+
+type repositoriesService interface {
+	List(ctx context.Context, user string, opts *github.RepositoryListOptions) ([]*github.Repository, *github.Response, error)
+}
+
+type userService interface {
+	Get(ctx context.Context, user string) (*github.User, *github.Response, error)
+	ListProjects(ctx context.Context, user string, opts *github.ProjectListOptions) ([]*github.Project, *github.Response, error)
 }
 
 func main() {
 	in := os.Stdin
 	out := os.Stdout
-	clientFactory := ClientFactory{
-		trelloClientFactory: func(token string) TrelloClient {
+	cliFactory := clientFactory{
+		newTrelloClient: func(token string) trelloClient {
 			return trello.NewClient(apikey, token)
 		},
-		githubClientFactory: func(token string) GithubClient {
+		newGithubAuthenticator: func() githubAuthenticator {
+			return deviceauth.NewAuthenticator()
+		},
+		newGithubClient: func(token string) githubClient {
 			ts := oauth2.StaticTokenSource(
 				&oauth2.Token{AccessToken: token},
 			)
 			tc := oauth2.NewClient(context.Background(), ts)
-			return github.NewClient(tc)
+			client := github.NewClient(tc)
+			return githubClient{
+				users: client.Users,
+			}
 		}}
-	configure(in, out, clientFactory)
+	configure(in, out, cliFactory)
 	// TODO: execute import and export
-}
-
-type ClientFactory struct {
-	trelloClientFactory func(token string) TrelloClient
-	githubClientFactory func(token string) GithubClient
 }
 
 type Configuration struct {
@@ -50,8 +72,9 @@ type Configuration struct {
 }
 
 type AuthConfiguration struct {
-	Token    string    `yaml:"token"`
-	Username yaml.Node `yaml:"username"`
+	Token    string `yaml:"token"`
+	Username string `yaml:"username"`
+	// Username yaml.Node `yaml:"username"`
 }
 
 type MappingConfiguration struct {
@@ -63,98 +86,170 @@ type MappingConfiguration struct {
 	GithubProjectName    string `yaml:"github_project_name"`
 }
 
-func configure(in io.Reader, out io.Writer, clientFactory ClientFactory) *Configuration {
-	var configuration Configuration
-	d, err := ioutil.ReadFile("config.yaml")
-	yaml.Unmarshal(d, &configuration)
+func configure(in io.Reader, out io.Writer, cliFactory clientFactory) *Configuration {
+	fmt.Fprintln(out, "# Configuration")
 
-	if err != nil {
-		// no config
-	}
+	// d, err := ioutil.ReadFile("config.yaml")
+	// var config Configuration
+	// yaml.Unmarshal(d, &config)
 
-	// Check missing values
-	// if configuration
-
-	// if (configuration == Configuration{}) {
-	// 	// S
-	// 	// have to auth
-	// 	trelloToken, _ := authenticateTrello(in, out)
-	// 	githubAuthenticator := deviceauth.NewAuthenticator()
-	// 	githubScopes := []github.Scope{github.ScopeRepo, github.ScopeAdminOrg, github.ScopeUser}
-	// 	githubToken, _ := githubAuthenticator.AuthenticateGithub(githubScopes)
-	// 	authTokens = AuthTokens{
-	// 		Trello: trelloToken,
-	// 		Github: githubToken,
-	// 	}
-	// 	d, _ = yaml.Marshal(authTokens)
-	// 	fmt.Println(string(d))
-	// 	ioutil.WriteFile(".auth.yaml", d, 0644)
+	// if err != nil {
+	// 	fmt.Fprintln(out, "No configuration file found in this directory. Follow the prompts to configure the tool.")
 	// }
 
-	// trelloClient := trello.NewClient(apikey, authTokens.Trello)
+	fmt.Fprintln(out, "No configuration file found in this directory. Follow the prompts to configure the tool.")
+	fmt.Fprintln(out, "")
 
-	// board := selectBoard(trelloClient, in, out)
-	// repo := selectRepository(githubClient.Repositories, in, out)
+	trelloClient, trelloAuth := authenticateTrello(in, out, cliFactory)
 
-	// // fmt.Println("Importing from ", board.Name, " to ", project.Name)
-	// fmt.Println("Importing from x to", repo.GetName())
+	githubClient, githubAuth := authenticateGithub(in, out, cliFactory)
+
+	fmt.Fprintln(out, "## Card mapping")
+
+	board := selectBoard(in, out, trelloClient)
+
+	repository := selectRepository(in, out, githubClient.repositories)
+
+	project := selectProject(in, out, githubClient.users)
+
+	config := Configuration{
+		TrelloAuth: trelloAuth,
+		GithubAuth: githubAuth,
+		Mapping: MappingConfiguration{
+			TrelloBoard:          board.ID,
+			TrelloBoardName:      board.Name,
+			GithubRepository:     fmt.Sprint(repository.GetID()),
+			GithubRepositoryName: repository.GetName(),
+			GithubProject:        fmt.Sprint(project.GetID()),
+			GithubProjectName:    project.GetName(),
+		},
+	}
+
+	fmt.Fprintln(out, "## Confirm")
+	fmt.Fprintln(out, "Your configuration is:")
+	fmt.Fprintf(out, "Trello account: %v\n", config.TrelloAuth.Username)
+	fmt.Fprintf(out, "Trello board: %v (ID: %v)\n", config.Mapping.TrelloBoardName, config.Mapping.TrelloBoard)
+	fmt.Fprintf(out, "GitHub account: %v\n", config.GithubAuth.Username)
+	fmt.Fprintf(out, "GitHub repository: %v (ID: %v)\n", config.Mapping.GithubRepositoryName, config.Mapping.GithubRepository)
+	fmt.Fprintf(out, "GitHub project: %v (ID: %v)\n\n", config.Mapping.GithubProjectName, config.Mapping.GithubProject)
+
+	fmt.Fprintln(out, "Would you like to save this configuration to a 'config.yaml' file for next time?")
+	fmt.Fprint(out, "(y/n) ")
+
+	var yesNo string
+	fmt.Fscanf(in, "%s", yesNo)
+	fmt.Fprintln(out, "")
+	fmt.Fprintln(out, "")
+
+	fmt.Fprintln(out, "Would you like to proceed with the import using these settings?")
+	fmt.Fprint(out, "(y/n) ")
+	fmt.Fprintln(out, "")
+	fmt.Fprintln(out, "")
+
+	fmt.Fscanf(in, "%s", yesNo)
+
+	fmt.Fprintln(out, "Configuration complete.")
+
 	return nil
 }
 
-func authenticateTrello(in io.Reader, out io.Writer) (token string, err error) {
-	fmt.Fprintln(out, "Open the following URL in your browser to authorize this tool to read the boards on your Trello account.")
-	fmt.Fprintf(out, "https://trello.com/1/authorize?expiration=never&name=Trello%%20to%%20Github&scope=read,account&response_type=token&key=%v\n", apikey)
-	fmt.Fprintln(out, "When the authentication process is complete, enter the token you receied here:")
+func authenticateTrello(in io.Reader, out io.Writer, cliFactory clientFactory) (trelloClient, AuthConfiguration) {
+	fmt.Fprintln(out, "## Trello authentication")
+	fmt.Fprintf(out, "In your browser, open https://trello.com/1/authorize?expiration=never&name=Trello%%20to%%20Github&scope=read,account&response_type=token&key=%v\n", apikey)
+	fmt.Fprintln(out, "When the authentication process is complete, enter the token you receied here.")
+	fmt.Fprint(out, "Token: ")
 
-	tokenChn := make(chan string, 1)
-	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Scan()
-	tokenChn <- scanner.Text()
-	return <-tokenChn, nil
+	var token string
+	fmt.Fscanf(in, "%s", token)
+
+	fmt.Fprintln(out, "")
+
+	client := cliFactory.newTrelloClient(token)
+	member, _ := client.GetMember("me", trello.Defaults())
+
+	fmt.Fprintf(out, "Successfully authenticated with Trello as %v.\n\n", member.Username)
+
+	return client, AuthConfiguration{
+		Token:    token,
+		Username: member.Username,
+	}
 }
 
-func selectBoard(client *trello.Client, in io.Reader, out io.Writer) *trello.Board {
+func authenticateGithub(in io.Reader, out io.Writer, cliFactory clientFactory) (githubClient, AuthConfiguration) {
+	fmt.Fprintln(out, "## GitHub authentication")
+	githubAuthenticator := cliFactory.newGithubAuthenticator()
+	githubScopes := []github.Scope{github.ScopeRepo, github.ScopeAdminOrg, github.ScopeUser}
+	token, _ := githubAuthenticator.AuthenticateGithub(githubScopes)
+
+	client := cliFactory.newGithubClient(token)
+
+	user, _, _ := client.users.Get(context.Background(), "")
+
+	fmt.Fprintf(out, "Successfully authenticated with GitHub as %v.\n\n", user.GetName())
+
+	return client, AuthConfiguration{
+		Token:    token,
+		Username: user.GetName(),
+	}
+}
+
+func selectBoard(in io.Reader, out io.Writer, client trelloClient) *trello.Board {
+	fmt.Fprintln(out, "### Trello board")
+	fmt.Fprintln(out, "Fetching Trello boards...")
 	boards, _ := client.GetMyBoards(trello.Defaults())
 	fmt.Fprintln(out, "Select the Trello board you want to import from:")
 	for i, board := range boards {
-		fmt.Fprintf(out, "(%v) %v\n", i, board.Name)
+		fmt.Fprintf(out, "[%v] %v (ID: %v)\n", i, board.Name, board.ID)
 	}
+	fmt.Fprint(out, "Board: ")
 
 	var selection int
 	fmt.Fscanf(in, "%d", selection)
+	fmt.Fprintln(out, "")
+
+	board := boards[selection]
+	fmt.Fprintf(out, "Selected '%v'.\n\n", board.Name)
+
 	return boards[selection]
 }
 
-type repositoriesClient interface {
-	List(ctx context.Context, user string, opts *github.RepositoryListOptions) ([]*github.Repository, *github.Response, error)
-}
-
-type usersClient interface {
-	Get(ctx context.Context, user string) (*github.User, *github.Response, error)
-	ListProjects(ctx context.Context, user string, opts *github.ProjectListOptions) ([]*github.Project, *github.Response, error)
-}
-
-func selectRepository(client repositoriesClient, in io.Reader, out io.Writer) *github.Repository {
+func selectRepository(in io.Reader, out io.Writer, client repositoriesService) *github.Repository {
+	fmt.Fprintln(out, "### GitHub repository")
+	fmt.Fprintln(out, "Fetching GitHub repositories...")
 	repos, _, _ := client.List(context.Background(), "", nil)
 	fmt.Fprintln(out, "Select the GitHub repository whose projects you want to export to:")
 	for i, repo := range repos {
-		fmt.Fprintf(out, "(%v) %v\n", i, *repo.Name)
+		fmt.Fprintf(out, "[%v] %v (ID: %v)\n", i, repo.GetName(), repo.GetID())
 	}
+	fmt.Fprint(out, "Repository: ")
 
 	var selection int
 	fmt.Fscanf(in, "%d", &selection)
+	fmt.Fprintln(out, "")
+
+	repo := repos[selection]
+	fmt.Fprintf(out, "Selected '%v'.\n\n", repo.GetName())
+
 	return repos[selection]
 }
 
-func selectProject(client usersClient, in io.Reader, out io.Writer) *github.Project {
+func selectProject(in io.Reader, out io.Writer, client userService) *github.Project {
+	fmt.Fprintln(out, "### GitHub project")
+	fmt.Fprintln(out, "Fetching GitHub projects...")
 	user, _, _ := client.Get(context.Background(), "")
 	projects, _, _ := client.ListProjects(context.Background(), user.GetName(), nil)
 	fmt.Fprintln(out, "Select the GitHub project you want to export to:")
 	for i, project := range projects {
-		fmt.Fprintf(out, "(%v) %v\n", i, *project.Name)
+		fmt.Fprintf(out, "[%v] %v (ID: %v)\n", i, project.GetName(), project.GetID())
 	}
+	fmt.Fprint(out, "Project: ")
 
 	var selection int
 	fmt.Fscanf(in, "%d\n", &selection)
+	fmt.Fprintln(out, "")
+
+	project := projects[selection]
+	fmt.Fprintf(out, "Selected '%v'.\n\n", project.GetName())
+
 	return projects[selection]
 }
