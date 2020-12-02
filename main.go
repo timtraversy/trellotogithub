@@ -177,7 +177,7 @@ func authenticateGithub(in io.Reader, out io.Writer, cliFactory clientFactory) (
 	githubAuthenticator := cliFactory.newGithubAuthenticator()
 	githubScopes := []github.Scope{github.ScopeRepo, github.ScopeAdminOrg, github.ScopeUser}
 	token, _ := githubAuthenticator.AuthenticateGithub(githubScopes)
-	// token := "ca73da46126d63b444901676d29003ccdf3b3e1c"
+	// token := "oauth"
 
 	client := cliFactory.newGithubClient(token)
 
