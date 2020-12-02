@@ -11,6 +11,7 @@ import (
 
 	"github.com/adlio/trello"
 	"github.com/google/go-github/v32/github"
+	"github.com/pkg/errors"
 )
 
 var idOne = int64(1)
@@ -84,23 +85,26 @@ var username = "testUser"
 
 func (m *mockUsersService) Get(ctx context.Context, user string) (*github.User, *github.Response, error) {
 	return &github.User{
-		Name: &username,
+		Login: &username,
 	}, nil, nil
-}
-
-func (m *mockUsersService) ListProjects(ctx context.Context, user string, opts *github.ProjectListOptions) ([]*github.Project, *github.Response, error) {
-	return mockProjects, nil, nil
 }
 
 type mockRepositoriesService struct {
 }
 
 func (m *mockRepositoriesService) List(ctx context.Context, user string, opts *github.RepositoryListOptions) ([]*github.Repository, *github.Response, error) {
+	if user == "" {
+		return nil, nil, errors.Errorf("User must be supplied")
+	}
 	return mockRepositories, nil, nil
 }
 
+func (m *mockRepositoriesService) ListProjects(ctx context.Context, owner, repo string, opts *github.ProjectListOptions) ([]*github.Project, *github.Response, error) {
+	return mockProjects, nil, nil
+}
+
 func TestConfigure(t *testing.T) {
-	selections := []string{"0", "0", "0", "n", "y"}
+	selections := []string{"token", "0", "0", "0", "n", "y"}
 	in := bytes.NewBufferString(strings.Join(selections, "\n"))
 
 	out := bytes.Buffer{}
@@ -125,14 +129,22 @@ func TestConfigure(t *testing.T) {
 	// Return Configuration struct
 	configure(in, &out, cliFactory)
 
+	/*
+	   Lines like:
+	   Board: Selected 'Test One'.
+
+	   Should be split, but have to be one line in test because of the way Fscan
+	   seems to treat stdin and buffered string differently.
+
+	   The program works properly when run.
+	*/
 	wantOut := fmt.Sprintf(`# Configuration
 No configuration file found in this directory. Follow the prompts to configure the tool.
 
 ## Trello authentication
 In your browser, open https://trello.com/1/authorize?expiration=never&name=Trello%%20to%%20Github&scope=read,account&response_type=token&key=%v
 When the authentication process is complete, enter the token you receied here.
-Token: 
-Successfully authenticated with Trello as testUser.
+Token: Successfully authenticated with Trello as testUser.
 
 ## GitHub authentication
 Requesting device and user verification codes from GitHub...
@@ -145,24 +157,21 @@ Fetching Trello boards...
 Select the Trello board you want to import from:
 [0] Test One (ID: 1)
 [1] Test Two (ID: 2)
-Board: 
-Selected 'Test One'.
+Board: Selected 'Test One'.
 
 ### GitHub repository
 Fetching GitHub repositories...
 Select the GitHub repository whose projects you want to export to:
 [0] Repository One (ID: 1)
 [1] Repository Two (ID: 2)
-Repository: 
-Selected 'Repository One'.
+Repository: Selected 'Repository One'.
 
 ### GitHub project
 Fetching GitHub projects...
 Select the GitHub project you want to export to:
 [0] Project One (ID: 1)
 [1] Project Two (ID: 2)
-Project: 
-Selected 'Project One'.
+Project: Selected 'Project One'.
 
 ## Confirm
 Your configuration is:

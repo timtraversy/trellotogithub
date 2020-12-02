@@ -34,11 +34,11 @@ type githubClient struct {
 
 type repositoriesService interface {
 	List(ctx context.Context, user string, opts *github.RepositoryListOptions) ([]*github.Repository, *github.Response, error)
+	ListProjects(ctx context.Context, owner, repo string, opts *github.ProjectListOptions) ([]*github.Project, *github.Response, error)
 }
 
 type userService interface {
 	Get(ctx context.Context, user string) (*github.User, *github.Response, error)
-	ListProjects(ctx context.Context, user string, opts *github.ProjectListOptions) ([]*github.Project, *github.Response, error)
 }
 
 func main() {
@@ -58,7 +58,8 @@ func main() {
 			tc := oauth2.NewClient(context.Background(), ts)
 			client := github.NewClient(tc)
 			return githubClient{
-				users: client.Users,
+				users:        client.Users,
+				repositories: client.Repositories,
 			}
 		}}
 	configure(in, out, cliFactory)
@@ -108,9 +109,9 @@ func configure(in io.Reader, out io.Writer, cliFactory clientFactory) *Configura
 
 	board := selectBoard(in, out, trelloClient)
 
-	repository := selectRepository(in, out, githubClient.repositories)
+	repository := selectRepository(in, out, githubAuth.Username, githubClient.repositories)
 
-	project := selectProject(in, out, githubClient.users)
+	project := selectProject(in, out, *repository, githubClient.repositories)
 
 	config := Configuration{
 		TrelloAuth: trelloAuth,
@@ -137,7 +138,7 @@ func configure(in io.Reader, out io.Writer, cliFactory clientFactory) *Configura
 	fmt.Fprint(out, "(y/n) ")
 
 	var yesNo string
-	fmt.Fscanf(in, "%s", yesNo)
+	fmt.Fscan(in, yesNo)
 	fmt.Fprintln(out, "")
 	fmt.Fprintln(out, "")
 
@@ -145,8 +146,6 @@ func configure(in io.Reader, out io.Writer, cliFactory clientFactory) *Configura
 	fmt.Fprint(out, "(y/n) ")
 	fmt.Fprintln(out, "")
 	fmt.Fprintln(out, "")
-
-	fmt.Fscanf(in, "%s", yesNo)
 
 	fmt.Fprintln(out, "Configuration complete.")
 
@@ -160,9 +159,7 @@ func authenticateTrello(in io.Reader, out io.Writer, cliFactory clientFactory) (
 	fmt.Fprint(out, "Token: ")
 
 	var token string
-	fmt.Fscanf(in, "%s", token)
-
-	fmt.Fprintln(out, "")
+	fmt.Fscan(in, &token)
 
 	client := cliFactory.newTrelloClient(token)
 	member, _ := client.GetMember("me", trello.Defaults())
@@ -180,16 +177,17 @@ func authenticateGithub(in io.Reader, out io.Writer, cliFactory clientFactory) (
 	githubAuthenticator := cliFactory.newGithubAuthenticator()
 	githubScopes := []github.Scope{github.ScopeRepo, github.ScopeAdminOrg, github.ScopeUser}
 	token, _ := githubAuthenticator.AuthenticateGithub(githubScopes)
+	// token := "ca73da46126d63b444901676d29003ccdf3b3e1c"
 
 	client := cliFactory.newGithubClient(token)
 
 	user, _, _ := client.users.Get(context.Background(), "")
 
-	fmt.Fprintf(out, "Successfully authenticated with GitHub as %v.\n\n", user.GetName())
+	fmt.Fprintf(out, "Successfully authenticated with GitHub as %v.\n\n", user.GetLogin())
 
 	return client, AuthConfiguration{
 		Token:    token,
-		Username: user.GetName(),
+		Username: user.GetLogin(),
 	}
 }
 
@@ -204,8 +202,7 @@ func selectBoard(in io.Reader, out io.Writer, client trelloClient) *trello.Board
 	fmt.Fprint(out, "Board: ")
 
 	var selection int
-	fmt.Fscanf(in, "%d", selection)
-	fmt.Fprintln(out, "")
+	fmt.Fscan(in, &selection)
 
 	board := boards[selection]
 	fmt.Fprintf(out, "Selected '%v'.\n\n", board.Name)
@@ -213,10 +210,10 @@ func selectBoard(in io.Reader, out io.Writer, client trelloClient) *trello.Board
 	return boards[selection]
 }
 
-func selectRepository(in io.Reader, out io.Writer, client repositoriesService) *github.Repository {
+func selectRepository(in io.Reader, out io.Writer, user string, client repositoriesService) *github.Repository {
 	fmt.Fprintln(out, "### GitHub repository")
 	fmt.Fprintln(out, "Fetching GitHub repositories...")
-	repos, _, _ := client.List(context.Background(), "", nil)
+	repos, _, _ := client.List(context.Background(), user, nil)
 	fmt.Fprintln(out, "Select the GitHub repository whose projects you want to export to:")
 	for i, repo := range repos {
 		fmt.Fprintf(out, "[%v] %v (ID: %v)\n", i, repo.GetName(), repo.GetID())
@@ -224,8 +221,7 @@ func selectRepository(in io.Reader, out io.Writer, client repositoriesService) *
 	fmt.Fprint(out, "Repository: ")
 
 	var selection int
-	fmt.Fscanf(in, "%d", &selection)
-	fmt.Fprintln(out, "")
+	fmt.Fscan(in, &selection)
 
 	repo := repos[selection]
 	fmt.Fprintf(out, "Selected '%v'.\n\n", repo.GetName())
@@ -233,11 +229,10 @@ func selectRepository(in io.Reader, out io.Writer, client repositoriesService) *
 	return repos[selection]
 }
 
-func selectProject(in io.Reader, out io.Writer, client userService) *github.Project {
+func selectProject(in io.Reader, out io.Writer, repository github.Repository, client repositoriesService) *github.Project {
 	fmt.Fprintln(out, "### GitHub project")
 	fmt.Fprintln(out, "Fetching GitHub projects...")
-	user, _, _ := client.Get(context.Background(), "")
-	projects, _, _ := client.ListProjects(context.Background(), user.GetName(), nil)
+	projects, _, _ := client.ListProjects(context.Background(), repository.GetOwner().GetLogin(), repository.GetName(), nil)
 	fmt.Fprintln(out, "Select the GitHub project you want to export to:")
 	for i, project := range projects {
 		fmt.Fprintf(out, "[%v] %v (ID: %v)\n", i, project.GetName(), project.GetID())
@@ -245,8 +240,7 @@ func selectProject(in io.Reader, out io.Writer, client userService) *github.Proj
 	fmt.Fprint(out, "Project: ")
 
 	var selection int
-	fmt.Fscanf(in, "%d\n", &selection)
-	fmt.Fprintln(out, "")
+	fmt.Fscan(in, &selection)
 
 	project := projects[selection]
 	fmt.Fprintf(out, "Selected '%v'.\n\n", project.GetName())
