@@ -15,4 +15,4 @@ RUN --mount=type=cache,target=/root/.cache/go-build go build -o /out/trellotogit
 
 FROM scratch 
 COPY --from=build /out/trellotogithub /
-CMD ["/trellotogithub"]
+ENTRYPOINT ["/trellotogithub"]

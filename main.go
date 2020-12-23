@@ -12,6 +12,8 @@ import (
 	"golang.org/x/oauth2"
 )
 
+const apiKey = "4960d7908c097bc466ab6fb8074340d6"
+
 type clientFactory struct {
 	newTrelloClient        func(token string) trelloClient
 	newGithubAuthenticator func() githubAuthenticator
@@ -46,7 +48,7 @@ func main() {
 	out := os.Stdout
 	cliFactory := clientFactory{
 		newTrelloClient: func(token string) trelloClient {
-			return trello.NewClient(apikey, token)
+			return trello.NewClient(apiKey, token)
 		},
 		newGithubAuthenticator: func() githubAuthenticator {
 			return deviceauth.NewAuthenticator()
@@ -154,7 +156,7 @@ func configure(in io.Reader, out io.Writer, cliFactory clientFactory) *Configura
 
 func authenticateTrello(in io.Reader, out io.Writer, cliFactory clientFactory) (trelloClient, AuthConfiguration) {
 	fmt.Fprintln(out, "## Trello authentication")
-	fmt.Fprintf(out, "In your browser, open https://trello.com/1/authorize?expiration=never&name=Trello%%20to%%20Github&scope=read,account&response_type=token&key=%v\n", apikey)
+	fmt.Fprintf(out, "In your browser, open https://trello.com/1/authorize?expiration=never&name=Trello%%20to%%20Github&scope=read,account&response_type=token&key=%v\n", apiKey)
 	fmt.Fprintln(out, "When the authentication process is complete, enter the token you receied here.")
 	fmt.Fprint(out, "Token: ")
 

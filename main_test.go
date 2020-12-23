@@ -188,7 +188,7 @@ Would you like to proceed with the import using these settings?
 (y/n) 
 
 Configuration complete.
-`, apikey)
+`, apiKey)
 	assertParagraphMatch(out.String(), wantOut, t)
 }
 

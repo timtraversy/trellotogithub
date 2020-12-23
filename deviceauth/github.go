@@ -14,6 +14,8 @@ import (
 	"github.com/google/go-github/v32/github"
 )
 
+const clientID = "410317ed53d1288f5b16"
+
 type GithubDeviceAuthenticator struct {
 	BaseURL string
 	Out     io.Writer
