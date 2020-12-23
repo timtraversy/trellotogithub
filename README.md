@@ -6,7 +6,7 @@ Import Trello cards into your GitHub projects.
 
 * With Docker, using the [GitHub Package](https://github.com/users/timtraversy/packages/container/package/trellotogithub)
 ```
-docker run --rm -v "${PWD}:/local" ghcr.io/timtraversy/trellotogithub:latest \
+docker run -it --rm -v "${PWD}:/local" ghcr.io/timtraversy/trellotogithub:latest \
     -c local/path/to/config.yaml
 ```
 
