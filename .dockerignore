@@ -1,7 +1,6 @@
 .devcontainer
 .git/
+.github/
 README.md
-bin/
 Dockerfile
 .dockerignore
-build.sh
